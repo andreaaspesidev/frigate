@@ -1,0 +1,1 @@
+These wheels are compiled for Python 3.9 for target architecture armv7.
