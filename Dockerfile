@@ -75,7 +75,7 @@ RUN apt-get -qq update && apt-get -qq install --no-install-recommends -y \
         libx265-165
 
 ## Tensorflow lite
-COPY docker_test/tflite_runtime-2.6.0-cp39-cp39-linux_armv7l.whl /tmp/tflite_runtime-2.6.0-cp39-cp39-linux_armv7l.whl
+COPY wheels/tflite_runtime-2.6.0-cp39-cp39-linux_armv7l.whl /tmp/tflite_runtime-2.6.0-cp39-cp39-linux_armv7l.whl
 RUN pip3 install /tmp/tflite_runtime-2.6.0-cp39-cp39-linux_armv7l.whl \
     && rm -rf /var/lib/apt/lists/* \
     && (apt-get autoremove -y; apt-get autoclean -y)
