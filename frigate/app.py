@@ -17,7 +17,7 @@ from playhouse.sqliteq import SqliteQueueDatabase
 from frigate.config import FrigateConfig
 from frigate.const import RECORD_DIR, CLIPS_DIR, CACHE_DIR
 from frigate.edgetpu import EdgeTPUProcess
-from frigate.events import EventProcessor, EventCleanup
+from frigate.events import EventProcessor, EventCleanup, VideoConverter
 from frigate.http import create_app
 from frigate.log import log_process, root_configurer
 from frigate.models import Event
@@ -41,6 +41,7 @@ class FrigateApp():
         self.detection_shms: List[mp.shared_memory.SharedMemory] = []
         self.log_queue = mp.Queue()
         self.camera_metrics = {}
+        self.video_queue = mp.Queue()
 
     def set_environment_vars(self):
         for key, value in self.config.environment_vars.items():
@@ -183,12 +184,16 @@ class FrigateApp():
             logger.info(f"Capture process started for {name}: {capture_process.pid}")
     
     def start_event_processor(self):
-        self.event_processor = EventProcessor(self.config, self.camera_metrics, self.event_queue, self.event_processed_queue, self.stop_event)
+        self.event_processor = EventProcessor(self.config, self.camera_metrics, self.event_queue, self.event_processed_queue, self.stop_event, self.video_queue)
         self.event_processor.start()
     
     def start_event_cleanup(self):
         self.event_cleanup = EventCleanup(self.config, self.stop_event)
         self.event_cleanup.start()
+
+    def start_video_converter(self):
+        self.video_converter = VideoConverter(self.config, self.stop_event, self.video_queue)
+        self.video_converter.start()
     
     def start_recording_maintainer(self):
         self.recording_maintainer = RecordingMaintainer(self.config, self.stop_event)
@@ -229,6 +234,7 @@ class FrigateApp():
         self.init_stats()
         self.init_web_server()
         self.start_event_processor()
+        self.start_video_converter()
         self.start_event_cleanup()
         self.start_recording_maintainer()
         self.start_stats_emitter()
@@ -253,6 +259,7 @@ class FrigateApp():
         self.detected_frames_processor.join()
         self.event_processor.join()
         self.event_cleanup.join()
+        self.video_converter.join()
         self.recording_maintainer.join()
         self.stats_emitter.join()
         self.frigate_watchdog.join()

@@ -89,6 +89,8 @@ GLOBAL_FFMPEG_SCHEMA = vol.Schema(
             vol.Optional('record', default=RECORD_FFMPEG_OUTPUT_ARGS_DEFAULT): vol.Any(str, [str]),
             vol.Optional('clips', default=SAVE_CLIPS_FFMPEG_OUTPUT_ARGS_DEFAULT): vol.Any(str, [str]),
             vol.Optional('rtmp', default=RTMP_FFMPEG_OUTPUT_ARGS_DEFAULT): vol.Any(str, [str]),
+            vol.Optional('convert_in'): vol.Any(str, [str]),
+            vol.Optional('convert_out'): vol.Any(str, [str]),
         }
     }
 )
@@ -173,6 +175,8 @@ CAMERA_FFMPEG_SCHEMA = vol.Schema(
             vol.Optional('record', default=RECORD_FFMPEG_OUTPUT_ARGS_DEFAULT): vol.Any(str, [str]),
             vol.Optional('clips', default=SAVE_CLIPS_FFMPEG_OUTPUT_ARGS_DEFAULT): vol.Any(str, [str]),
             vol.Optional('rtmp', default=RTMP_FFMPEG_OUTPUT_ARGS_DEFAULT): vol.Any(str, [str]),
+            vol.Optional('convert_in'): vol.Any(str, [str]),
+            vol.Optional('convert_out'): vol.Any(str, [str]),
         }
     }
 )
@@ -211,7 +215,7 @@ CAMERAS_SCHEMA = vol.Schema(vol.All(
                 'retain_days': int,
             },
             vol.Optional('rtmp', default={}): {
-                vol.Required('enabled', default=True): bool,
+                vol.Required('enabled', default=False): bool,
             },
             vol.Optional('snapshots', default={}): {
                 vol.Optional('enabled', default=False): bool,
@@ -960,6 +964,14 @@ class CameraConfig():
     @property
     def record(self):
         return self._record
+
+    @property
+    def video_conversion_in(self):
+        return self.ffmpeg.output_args['convert_in'] if 'convert_in' in self.ffmpeg.output_args else None
+
+    @property
+    def video_conversion_out(self):
+        return self.ffmpeg.output_args['convert_out'] if 'convert_out' in self.ffmpeg.output_args else None
 
     @property
     def rtmp(self):
