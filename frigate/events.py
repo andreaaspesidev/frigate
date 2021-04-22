@@ -21,7 +21,7 @@ from peewee import fn
 logger = logging.getLogger(__name__)
 
 class EventProcessor(threading.Thread):
-    def __init__(self, config, camera_processes, event_queue, event_processed_queue, stop_event):
+    def __init__(self, config, camera_processes, event_queue, event_processed_queue, stop_event, video_queue):
         threading.Thread.__init__(self)
         self.name = 'event_processor'
         self.config = config
@@ -31,6 +31,7 @@ class EventProcessor(threading.Thread):
         self.event_processed_queue = event_processed_queue
         self.events_in_process = {}
         self.stop_event = stop_event
+        self.video_queue = video_queue
 
     def should_create_clip(self, camera, event_data):
         if event_data['false_positive']:
@@ -181,6 +182,8 @@ class EventProcessor(threading.Thread):
         if p.returncode != 0:
             logger.error(p.stderr)
             return False
+        # Add to queue
+        self.video_queue.put((camera, f"{os.path.join(CLIPS_DIR, clip_name)}.mp4"))
         return True
 
     def run(self):
@@ -267,6 +270,9 @@ class EventCleanup(threading.Thread):
                 media_name = f"{event.camera}-{event.id}"
                 media = Path(f"{os.path.join(CLIPS_DIR, media_name)}.{file_extension}")
                 media.unlink(missing_ok=True)
+                # delete also original clip if exists
+                original_media = VideoConverter.get_original_backup_file(f"{os.path.join(CLIPS_DIR, media_name)}.{file_extension}")
+                original_media.unlink(missing_ok=True)
             # update the clips attribute for the db entry
             update_query = (
                 Event.update(update_params)
@@ -304,6 +310,9 @@ class EventCleanup(threading.Thread):
                     media_name = f"{event.camera}-{event.id}"
                     media = Path(f"{os.path.join(CLIPS_DIR, media_name)}.{file_extension}")
                     media.unlink(missing_ok=True)
+                    # delete also original clip if exists
+                    original_media = VideoConverter.get_original_backup_file(f"{os.path.join(CLIPS_DIR, media_name)}.{file_extension}")
+                    original_media.unlink(missing_ok=True)
                 # update the clips attribute for the db entry
                 update_query = (
                     Event.update(update_params)
@@ -340,6 +349,9 @@ class EventCleanup(threading.Thread):
             if event.has_clip:
                 media = Path(f"{os.path.join(CLIPS_DIR, media_name)}.mp4")
                 media.unlink(missing_ok=True)
+                # Delete also original if exists
+                original_media = VideoConverter.get_original_backup_file(f"{os.path.join(CLIPS_DIR, media_name)}.mp4")
+                original_media.unlink(missing_ok=True)
 
         (Event.delete()
             .where( Event.id << [event.id for event in duplicate_events] )
@@ -370,3 +382,90 @@ class EventCleanup(threading.Thread):
                         Event.has_snapshot == False)
             )
             delete_query.execute()
+
+class VideoConverter(threading.Thread):
+    def __init__(self, config: FrigateConfig, stop_event, video_queue):
+        threading.Thread.__init__(self)
+        self.name = 'video_converter'
+        self.config = config
+        self.stop_event = stop_event
+        self.video_queue = video_queue
+
+    def conversion_required(self):
+        # Check if conversion is enabled for at least one camera
+        for camera in self.config.cameras:
+            # Check also ffmpeg configuration
+            camera_data = self.config.cameras[camera]
+            if camera_data.video_conversion_in is None and camera_data.video_conversion_out is not None:
+                logger.error(f"Missing video conversion in configuration for camera {camera}")
+                return False
+            elif camera_data.video_conversion_in is not None and camera_data.video_conversion_out is None:
+                logger.error(f"Missing video conversion out configuration for camera {camera}")
+                return False
+            else:
+                return True
+        
+        return False
+
+    @staticmethod
+    def get_temp_file(video_file):
+        # Get path without extension
+        index_of_sep = str(video_file).rfind('.')
+        file_name = video_file[0:index_of_sep]
+        extension = video_file[index_of_sep:]
+        return file_name + "-tmp" + extension
+    
+    @staticmethod
+    def get_original_backup_file(video_file):
+        # Get path without extension
+        index_of_sep = str(video_file).rfind('.')
+        file_name = video_file[0:index_of_sep]
+        extension = video_file[index_of_sep:]
+        return file_name + "-original" + extension
+
+    def convert_video(self, video_file, ffmpeg_args_in, ffmpeg_args_out):
+        # Construct ffmpeg command
+        logger.info(f"Converting {video_file}...")
+        ffmpeg_cmd = (['nice', '-n', '19', 'ffmpeg'] + 
+                ffmpeg_args_in + 
+                ['-i', video_file] +
+                ffmpeg_args_out + 
+                [self.get_temp_file(video_file)])
+
+        logger.debug(ffmpeg_cmd)
+        # Launch process
+        p = sp.run(ffmpeg_cmd, encoding='ascii', capture_output=True)
+        if p.returncode != 0:
+            logger.error(p.stderr)
+            return False
+        logger.debug(f"Conversion completed for {video_file}")
+        return True
+    
+    def run(self):
+        # Check if video conversion is required, otherwise just exit
+        if not self.conversion_required:
+            logger.info(f"Stopping video converter as not required")
+            return
+
+        while True:
+            # Check if termination is requested
+            if self.stop_event.is_set():
+                logger.info(f"Exiting video converter processor...")
+                break
+            # Take a video to convert from the queue
+            try:
+                camera, video_file = self.video_queue.get(timeout=10)
+            except queue.Empty:
+                continue    # Check at next iteration
+
+            logger.debug(f"Starting conversion of {video_file}")
+
+            # Launch ffmpeg with provided args
+            camera_data = self.config.cameras[camera]
+            result = self.convert_video(video_file, camera_data.video_conversion_in, camera_data.video_conversion_out)
+            
+            # Replace original file
+            if result:
+                os.replace(video_file, self.get_original_backup_file(video_file))
+                os.replace(self.get_temp_file(video_file), video_file)
+            
