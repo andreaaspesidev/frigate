@@ -1,0 +1,77 @@
+ARG WHEELS_VERSION
+ARG FFMPEG_VERSION
+FROM andreaaspesi/frigate-wheels:${WHEELS_VERSION} as wheels
+FROM andreaaspesi/frigate-ffmpeg:${FFMPEG_VERSION} as ffmpeg
+FROM frigate-web as web
+
+FROM ubuntu:20.04
+
+COPY --from=ffmpeg /usr/local /usr/local/
+
+COPY --from=wheels /wheels/. /wheels/
+
+ENV FLASK_ENV=development
+# ENV FONTCONFIG_PATH=/etc/fonts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install packages for apt repo
+RUN apt-get -qq update \
+    && apt-get upgrade -y \
+    && apt-get install -y \
+        gnupg \
+        wget \
+        unzip \
+        tzdata \
+        nginx \
+        libnginx-mod-rtmp \
+        python3-pip
+
+RUN apt-get install -y \
+        # ffmpeg runtime dependencies
+        libgomp1 \
+        # runtime dependencies
+        libopenexr24 \
+        libgstreamer1.0-0 \
+        libgstreamer-plugins-base1.0-0 \
+        libopenblas-base \
+        libjpeg-turbo8 \
+        libpng16-16 \
+        libtiff5 \
+        libdc1394-22 \
+        libaom0 \
+        libx265-179
+
+# wheels
+RUN pip3 install -U /wheels/*.whl
+RUN pip3 install https://github.com/google-coral/pycoral/releases/download/release-frogfish/tflite_runtime-2.5.0-cp38-cp38-linux_armv7l.whl
+
+# edgetpu lib
+RUN APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn apt-key adv --fetch-keys https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+    && echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" > /etc/apt/sources.list.d/coral-edgetpu.list \
+    && echo "libedgetpu1-max libedgetpu/accepted-eula select true" | debconf-set-selections \
+    && apt-get -qq update && apt-get install -y \
+        libedgetpu1-max
+
+RUN rm -rf /var/lib/apt/lists/* /wheels \
+    && (apt-get autoremove -y; apt-get autoclean -y)
+
+COPY nginx/nginx.conf /etc/nginx/nginx.conf
+
+# get model and labels
+COPY labelmap.txt /labelmap.txt
+COPY models/ssdlite_mobiledet_coco_qat_postprocess_edgetpu.tflite /edgetpu_model.tflite
+COPY models/ssdlite_mobiledet_coco_qat_postprocess.tflite /cpu_model.tflite
+
+WORKDIR /opt/frigate/
+ADD frigate frigate/
+ADD migrations migrations/
+
+COPY --from=web /opt/frigate/build web/
+
+COPY run.sh /run.sh
+RUN chmod +x /run.sh
+
+EXPOSE 5000
+EXPOSE 1935
+
+CMD ["/run.sh"]

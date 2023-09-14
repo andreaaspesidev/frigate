@@ -9,6 +9,7 @@ import os
 import queue
 import threading
 import time
+import base64
 from collections import Counter, defaultdict
 from statistics import mean, median
 from typing import Callable, Dict
@@ -478,6 +479,10 @@ class TrackedObjectProcessor(threading.Thread):
                     crop=mqtt_config.crop,
                     height=mqtt_config.height
                 )
+
+                # Encode image if required
+                if mqtt_config.encode:
+                    jpg_bytes = base64.b64encode(jpg_bytes)
 
                 if jpg_bytes is None:
                     logger.warning(f"Unable to send mqtt snapshot for {obj.obj_data['id']}.")

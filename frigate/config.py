@@ -231,6 +231,7 @@ CAMERAS_SCHEMA = vol.Schema(vol.All(
                 vol.Optional('timestamp', default=True): bool,
                 vol.Optional('bounding_box', default=True): bool,
                 vol.Optional('crop', default=True): bool,
+                vol.Optional('encode', default=True): bool,
                 vol.Optional('height', default=270): int,
                 vol.Optional('required_zones', default=[]): [str],
             },
@@ -643,6 +644,7 @@ class CameraMqttConfig():
         self._timestamp = config['timestamp']
         self._bounding_box = config['bounding_box']
         self._crop = config['crop']
+        self._encode = config['encode']
         self._height = config.get('height')
         self._required_zones = config['required_zones']
 
@@ -663,6 +665,10 @@ class CameraMqttConfig():
         return self._crop
 
     @property
+    def encode(self):
+        return self._encode
+
+    @property
     def height(self):
         return self._height
 
@@ -675,6 +681,7 @@ class CameraMqttConfig():
             'enabled': self.enabled,
             'timestamp': self.timestamp,
             'bounding_box': self.bounding_box,
+            'encode': self.encode,
             'crop': self.crop,
             'height': self.height,
             'required_zones': self.required_zones

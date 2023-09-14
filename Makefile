@@ -1,59 +1,25 @@
-default_target: amd64_frigate
-
-COMMIT_HASH := $(shell git log -1 --pretty=format:"%h"|tail -1)
-
 version:
-	echo "VERSION='0.8.4-$(COMMIT_HASH)'" > frigate/version.py
+	echo "VERSION='1.0.0-andreaaspesi'" > frigate/version.py
 
 web:
 	docker build --tag frigate-web --file docker/Dockerfile.web web/
 
-amd64_wheels:
-	docker build --tag blakeblackshear/frigate-wheels:1.0.3-amd64 --file docker/Dockerfile.wheels .
+wheels:
+	docker build --tag andreaaspesi/frigate-wheels:1.0.0 --file docker/Dockerfile.wheels .
 
-amd64_ffmpeg:
-	docker build --tag blakeblackshear/frigate-ffmpeg:1.1.0-amd64 --file docker/Dockerfile.ffmpeg.amd64 .
+ffmpeg:
+	docker build --tag andreaaspesi/frigate-ffmpeg:1.0.0 --file docker/Dockerfile.ffmpeg .
 
-amd64_frigate: version web
-	docker build --tag frigate-base --build-arg ARCH=amd64 --build-arg FFMPEG_VERSION=1.1.0 --build-arg WHEELS_VERSION=1.0.3 --file docker/Dockerfile.base .
-	docker build --tag frigate --file docker/Dockerfile.amd64 .
+frigate: version
+	docker build --build-arg FFMPEG_VERSION=1.0.0 --build-arg WHEELS_VERSION=1.0.0 --tag andreaaspesi/frigate:2.0.0 --file docker/Dockerfile.frigate .
 
-amd64_all: amd64_wheels amd64_ffmpeg amd64_frigate
+push:
+	docker push andreaaspesi/frigate-wheels:1.0.0
+	docker push andreaaspesi/frigate-ffmpeg:1.0.0
+	docker push andreaaspesi/frigate:2.0.0
 
-amd64nvidia_wheels:
-	docker build --tag blakeblackshear/frigate-wheels:1.0.3-amd64nvidia --file docker/Dockerfile.wheels .
+all: web wheels ffmpeg frigate
 
-amd64nvidia_ffmpeg:
-	docker build --tag blakeblackshear/frigate-ffmpeg:1.0.0-amd64nvidia --file docker/Dockerfile.ffmpeg.amd64nvidia .
-
-amd64nvidia_frigate: version web
-	docker build --tag frigate-base --build-arg ARCH=amd64nvidia --build-arg FFMPEG_VERSION=1.0.0 --build-arg WHEELS_VERSION=1.0.3 --file docker/Dockerfile.base .
-	docker build --tag frigate --file docker/Dockerfile.amd64nvidia .
-
-amd64nvidia_all: amd64nvidia_wheels amd64nvidia_ffmpeg amd64nvidia_frigate
-
-aarch64_wheels:
-	docker build --tag blakeblackshear/frigate-wheels:1.0.3-aarch64 --file docker/Dockerfile.wheels .
-
-aarch64_ffmpeg:
-	docker build --tag blakeblackshear/frigate-ffmpeg:1.0.0-aarch64 --file docker/Dockerfile.ffmpeg.aarch64 .
-
-aarch64_frigate: version web
-	docker build --tag frigate-base --build-arg ARCH=aarch64 --build-arg FFMPEG_VERSION=1.0.0 --build-arg WHEELS_VERSION=1.0.3 --file docker/Dockerfile.base .
-	docker build --tag frigate --file docker/Dockerfile.aarch64 .
-
-armv7_all: armv7_wheels armv7_ffmpeg armv7_frigate
-
-armv7_wheels:
-	docker build --tag blakeblackshear/frigate-wheels:1.0.3-armv7 --file docker/Dockerfile.wheels .
-
-armv7_ffmpeg:
-	docker build --tag blakeblackshear/frigate-ffmpeg:1.0.0-armv7 --file docker/Dockerfile.ffmpeg.armv7 .
-
-armv7_frigate: version web
-	docker build --tag frigate-base --build-arg ARCH=armv7 --build-arg FFMPEG_VERSION=1.0.0 --build-arg WHEELS_VERSION=1.0.3 --file docker/Dockerfile.base .
-	docker build --tag frigate --file docker/Dockerfile.armv7 .
-
-armv7_all: armv7_wheels armv7_ffmpeg armv7_frigate
+default_target: frigate
 
 .PHONY: web

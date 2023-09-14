@@ -139,7 +139,7 @@ def capture_frames(ffmpeg_process, camera_name, frame_shape, frame_manager: Fram
         frame_queue.put(current_frame.value)
 
 class CameraWatchdog(threading.Thread):
-    def __init__(self, camera_name, config, frame_queue, camera_fps, ffmpeg_pid, stop_event):
+    def __init__(self, camera_name, config, frame_queue, camera_fps, ffmpeg_pid, stop_event, mqtt_client, topic_prefix):
         threading.Thread.__init__(self)
         self.logger = logging.getLogger(f"watchdog.{camera_name}")
         self.camera_name = camera_name
@@ -154,6 +154,10 @@ class CameraWatchdog(threading.Thread):
         self.frame_shape = self.config.frame_shape_yuv
         self.frame_size = self.frame_shape[0] * self.frame_shape[1]
         self.stop_event = stop_event
+        self.mqtt_client = mqtt_client
+        self.topic_prefix = topic_prefix
+        self.last_online_status = False
+        self.first_start = True
 
     def run(self):
         self.start_ffmpeg_detect()
@@ -170,20 +174,24 @@ class CameraWatchdog(threading.Thread):
         
         time.sleep(10)
         while True:
+            online = True
             if self.stop_event.is_set():
                 stop_ffmpeg(self.ffmpeg_detect_process, self.logger)
                 for p in self.ffmpeg_other_processes:
                     stop_ffmpeg(p['process'], self.logger)
                     p['logpipe'].close()
                 self.logpipe.close()
+                self.publish_camera_status(self.camera_name, False)
                 break
 
             now = datetime.datetime.now().timestamp()
 
             if not self.capture_thread.is_alive():
+                online = False
                 self.logpipe.dump()
                 self.start_ffmpeg_detect()
             elif now - self.capture_thread.current_frame.value > 20:
+                online = False
                 self.logger.info(f"No frames received from {self.camera_name} in 20 seconds. Exiting ffmpeg...")
                 self.ffmpeg_detect_process.terminate()
                 try:
@@ -193,6 +201,12 @@ class CameraWatchdog(threading.Thread):
                     self.logger.info("FFmpeg didnt exit. Force killing...")
                     self.ffmpeg_detect_process.kill()
                     self.ffmpeg_detect_process.communicate()
+
+            # update mqtt status
+            if self.last_online_status != online or self.first_start:
+                self.publish_camera_status(self.camera_name, online)
+                self.last_online_status = online
+                self.first_start = False
             
             for p in self.ffmpeg_other_processes:
                 poll = p['process'].poll()
@@ -211,6 +225,10 @@ class CameraWatchdog(threading.Thread):
         self.capture_thread = CameraCapture(self.camera_name, self.ffmpeg_detect_process, self.frame_shape, self.frame_queue, 
             self.camera_fps)
         self.capture_thread.start()
+
+    def publish_camera_status(self, camera_name, is_online):
+        self.logger.debug(f"Publishing camera status update on {self.topic_prefix}/{camera_name}/available: {'online' if is_online else 'offline'}")
+        self.mqtt_client.publish(f"{self.topic_prefix}/{camera_name}/available", "online" if is_online else "offline", retain=True, qos=2)
 
 class CameraCapture(threading.Thread):
     def __init__(self, camera_name, ffmpeg_process, frame_shape, frame_queue, fps):
@@ -231,7 +249,7 @@ class CameraCapture(threading.Thread):
         capture_frames(self.ffmpeg_process, self.camera_name, self.frame_shape, self.frame_manager, self.frame_queue,
             self.fps, self.skipped_fps, self.current_frame)
 
-def capture_camera(name, config: CameraConfig, process_info):
+def capture_camera(name, config: CameraConfig, process_info, mqtt_client, topic_prefix):
     stop_event = mp.Event()
     def receiveSignal(signalNumber, frame):
         stop_event.set()
@@ -240,7 +258,7 @@ def capture_camera(name, config: CameraConfig, process_info):
     signal.signal(signal.SIGINT, receiveSignal)
 
     frame_queue = process_info['frame_queue']
-    camera_watchdog = CameraWatchdog(name, config, frame_queue, process_info['camera_fps'], process_info['ffmpeg_pid'], stop_event)
+    camera_watchdog = CameraWatchdog(name, config, frame_queue, process_info['camera_fps'], process_info['ffmpeg_pid'], stop_event, mqtt_client, topic_prefix)
     camera_watchdog.start()
     camera_watchdog.join()
 

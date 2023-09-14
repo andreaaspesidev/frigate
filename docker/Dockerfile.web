@@ -1,0 +1,11 @@
+ARG NODE_VERSION=14.18.1
+
+FROM node:${NODE_VERSION}
+
+WORKDIR /opt/frigate
+
+COPY . .
+
+RUN npm install --no-package-lock
+RUN npm run build
+

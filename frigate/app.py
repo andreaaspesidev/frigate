@@ -177,7 +177,7 @@ class FrigateApp():
     def start_camera_capture_processes(self):
         for name, config in self.config.cameras.items():
             capture_process = mp.Process(target=capture_camera, name=f"camera_capture:{name}", args=(name, config,
-                self.camera_metrics[name]))
+                self.camera_metrics[name],self.mqtt_client,self.config.mqtt.topic_prefix))
             capture_process.daemon = True
             self.camera_metrics[name]['capture_process'] = capture_process
             capture_process.start()
