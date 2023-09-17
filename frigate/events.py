@@ -570,7 +570,7 @@ class EventCleanup(threading.Thread):
                 media.unlink(missing_ok=True)
                 # delete also original clip if exists
                 original_media = VideoConverter.get_original_backup_file(f"{os.path.join(CLIPS_DIR, media_name)}.{file_extension}")
-                original_media.unlink(missing_ok=True)
+                Path(original_media).unlink(missing_ok=True)
             # update the clips attribute for the db entry
             update_query = (
                 Event.update(update_params)
@@ -610,7 +610,7 @@ class EventCleanup(threading.Thread):
                     media.unlink(missing_ok=True)
                     # delete also original clip if exists
                     original_media = VideoConverter.get_original_backup_file(f"{os.path.join(CLIPS_DIR, media_name)}.{file_extension}")
-                    original_media.unlink(missing_ok=True)
+                    Path(original_media).unlink(missing_ok=True)
                 # update the clips attribute for the db entry
                 update_query = (
                     Event.update(update_params)

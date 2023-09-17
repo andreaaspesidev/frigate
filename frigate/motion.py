@@ -10,8 +10,8 @@ class MotionDetector():
         self.frame_shape = frame_shape
         self.resize_factor = frame_shape[0]/config.frame_height
         self.motion_frame_size = (config.frame_height, config.frame_height*frame_shape[1]//frame_shape[0])
-        self.avg_frame = np.zeros(self.motion_frame_size, np.float)
-        self.avg_delta = np.zeros(self.motion_frame_size, np.float)
+        self.avg_frame = np.zeros(self.motion_frame_size, float)
+        self.avg_delta = np.zeros(self.motion_frame_size, float)
         self.motion_frame_count = 0
         self.frame_counter = 0
         resized_mask = cv2.resize(config.mask, dsize=(self.motion_frame_size[1], self.motion_frame_size[0]), interpolation=cv2.INTER_LINEAR)

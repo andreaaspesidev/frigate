@@ -11,7 +11,7 @@ import gevent
 import numpy as np
 from flask import (Blueprint, Flask, Response, current_app, jsonify,
                    make_response, request)
-from flask_sockets import Sockets
+from frigate.flask_sockets import Sockets
 from peewee import SqliteDatabase, operator, fn, DoesNotExist
 from playhouse.shortcuts import model_to_dict
 
@@ -24,7 +24,7 @@ from frigate.version import VERSION
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('frigate', __name__)
-ws = Blueprint('ws', __name__)
+sockets = Sockets()
 
 class MqttBackend():
     """Interface for registering and updating WebSocket clients."""
@@ -82,11 +82,11 @@ class MqttBackend():
 
 def create_app(frigate_config, database: SqliteDatabase, stats_tracking, detected_frames_processor, mqtt_client):
     app = Flask(__name__)
-    sockets = Sockets(app)
+    sockets.init_app(app)
 
     @app.before_request
     def _db_connect():
-        database.connect()
+        database.connect(reuse_if_open=True)
 
     @app.teardown_request
     def _db_close(exc):
@@ -98,7 +98,6 @@ def create_app(frigate_config, database: SqliteDatabase, stats_tracking, detecte
     app.detected_frames_processor = detected_frames_processor
 
     app.register_blueprint(bp)
-    sockets.register_blueprint(ws)
 
     app.mqtt_backend = MqttBackend(mqtt_client, frigate_config.mqtt.topic_prefix)
     app.mqtt_backend.start()
@@ -213,6 +212,9 @@ def event_snapshot(id):
     except:
         return "Event not found", 404
 
+    if jpg_bytes is None:
+        return "Event not found", 404
+
     response = make_response(jpg_bytes)
     response.headers['Content-Type'] = 'image/jpg'
     return response
@@ -282,27 +284,30 @@ def stats():
 @bp.route('/<camera_name>/<label>/best.jpg')
 def best(camera_name, label):
     if camera_name in current_app.frigate_config.cameras:
-        best_object = current_app.detected_frames_processor.get_best(camera_name, label)
-        best_frame = best_object.get('frame')
-        if best_frame is None:
-            best_frame = np.zeros((720,1280,3), np.uint8)
-        else:
-            best_frame = cv2.cvtColor(best_frame, cv2.COLOR_YUV2BGR_I420)
+        try:
+            best_object = current_app.detected_frames_processor.get_best(camera_name, label)
+            best_frame = best_object.get('frame')
+            if best_frame is None:
+                best_frame = np.zeros((720,1280,3), np.uint8)
+            else:
+                best_frame = cv2.cvtColor(best_frame, cv2.COLOR_YUV2BGR_I420)
 
-        crop = bool(request.args.get('crop', 0, type=int))
-        if crop:
-            box = best_object.get('box', (0,0,300,300))
-            region = calculate_region(best_frame.shape, box[0], box[1], box[2], box[3], 1.1)
-            best_frame = best_frame[region[1]:region[3], region[0]:region[2]]
+            crop = bool(request.args.get('crop', 0, type=int))
+            if crop:
+                box = best_object.get('box', (0,0,300,300))
+                region = calculate_region(best_frame.shape, box[0], box[1], box[2], box[3], 1.1)
+                best_frame = best_frame[region[1]:region[3], region[0]:region[2]]
 
-        height = int(request.args.get('h', str(best_frame.shape[0])))
-        width = int(height*best_frame.shape[1]/best_frame.shape[0])
+            height = int(request.args.get('h', str(best_frame.shape[0])))
+            width = int(height*best_frame.shape[1]/best_frame.shape[0])
 
-        best_frame = cv2.resize(best_frame, dsize=(width, height), interpolation=cv2.INTER_AREA)
-        ret, jpg = cv2.imencode('.jpg', best_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-        response = make_response(jpg.tobytes())
-        response.headers['Content-Type'] = 'image/jpg'
-        return response
+            best_frame = cv2.resize(best_frame, dsize=(width, height), interpolation=cv2.INTER_AREA)
+            ret, jpg = cv2.imencode('.jpg', best_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            response = make_response(jpg.tobytes())
+            response.headers['Content-Type'] = 'image/jpg'
+            return response
+        except:
+            return "Cannot read snap from camera {}".format(camera_name), 500
     else:
         return "Camera named {} not found".format(camera_name), 404
 
@@ -319,9 +324,12 @@ def mjpeg_feed(camera_name):
         'regions': request.args.get('regions', type=int),
     }
     if camera_name in current_app.frigate_config.cameras:
-        # return a multipart response
-        return Response(imagestream(current_app.detected_frames_processor, camera_name, fps, height, draw_options),
-                        mimetype='multipart/x-mixed-replace; boundary=frame')
+        try:
+            # return a multipart response
+            return Response(imagestream(current_app.detected_frames_processor, camera_name, fps, height, draw_options),
+                            mimetype='multipart/x-mixed-replace; boundary=frame')
+        except:
+            return "Cannot read snap from camera {}".format(camera_name), 500
     else:
         return "Camera named {} not found".format(camera_name), 404
 
@@ -337,19 +345,22 @@ def latest_frame(camera_name):
     }
     if camera_name in current_app.frigate_config.cameras:
         # max out at specified FPS
-        frame = current_app.detected_frames_processor.get_current_frame(camera_name, draw_options)
-        if frame is None:
-            frame = np.zeros((720,1280,3), np.uint8)
+        try:
+            frame = current_app.detected_frames_processor.get_current_frame(camera_name, draw_options)
+            if frame is None:
+                frame = np.zeros((720,1280,3), np.uint8)
 
-        height = int(request.args.get('h', str(frame.shape[0])))
-        width = int(height*frame.shape[1]/frame.shape[0])
+            height = int(request.args.get('h', str(frame.shape[0])))
+            width = int(height*frame.shape[1]/frame.shape[0])
 
-        frame = cv2.resize(frame, dsize=(width, height), interpolation=cv2.INTER_AREA)
+            frame = cv2.resize(frame, dsize=(width, height), interpolation=cv2.INTER_AREA)
 
-        ret, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-        response = make_response(jpg.tobytes())
-        response.headers['Content-Type'] = 'image/jpg'
-        return response
+            ret, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            response = make_response(jpg.tobytes())
+            response.headers['Content-Type'] = 'image/jpg'
+            return response
+        except:
+            return "Cannot read snap from camera {}".format(camera_name), 500
     else:
         return "Camera named {} not found".format(camera_name), 404
 
@@ -368,14 +379,17 @@ def imagestream(detected_frames_processor, camera_name, fps, height, draw_option
         yield (b'--frame\r\n'
             b'Content-Type: image/jpeg\r\n\r\n' + jpg.tobytes() + b'\r\n\r\n')
 
-@ws.route('/ws')
+@sockets.route('/ws', websocket=True)
 def echo_socket(socket):
     current_app.mqtt_backend.register(socket)
 
-    while not socket.closed:
-        # Sleep to prevent *constant* context-switches.
-        gevent.sleep(0.1)
+    try:
+        while not socket.closed:
+            # Sleep to prevent *constant* context-switches.
+            gevent.sleep(0.1)
 
-        message = socket.receive()
-        if message:
-            current_app.mqtt_backend.publish(message)
+            message = socket.receive()
+            if message:
+                current_app.mqtt_backend.publish(message)
+    except:
+        logger.warn("Caught: Websocket crashed")

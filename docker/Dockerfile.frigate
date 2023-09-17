@@ -42,6 +42,7 @@ RUN apt-get install -y \
         libx265-179
 
 # wheels
+RUN pip3 install -U pip
 RUN pip3 install -U /wheels/*.whl
 RUN pip3 install https://github.com/google-coral/pycoral/releases/download/release-frogfish/tflite_runtime-2.5.0-cp38-cp38-linux_armv7l.whl
 

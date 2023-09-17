@@ -29,11 +29,15 @@ RUN pip3 wheel --wheel-dir=/wheels    psutil
 RUN pip3 wheel --wheel-dir=/wheels    matplotlib
 RUN pip3 wheel --wheel-dir=/wheels    scipy==1.6.1
 
-RUN pip3 wheel --wheel-dir=/wheels \    
+RUN apt-get remove -y cython
+
+RUN pip3 install "Cython<3.0" --no-build-isolation
+
+RUN pip3 wheel --no-build-isolation --wheel-dir=/wheels \    
     Flask==1.1.2 \
     Flask-Sockets \
     paho-mqtt \
-    PyYAML==5.4.1 \
+    PyYAML==6.0.1 \
     setproctitle \
     peewee==3.14.1 \
     peewee_migrate \
