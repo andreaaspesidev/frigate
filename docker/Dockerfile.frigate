@@ -2,7 +2,7 @@ ARG WHEELS_VERSION
 ARG FFMPEG_VERSION
 FROM andreaaspesi/frigate-wheels:${WHEELS_VERSION} as wheels
 FROM andreaaspesi/frigate-ffmpeg:${FFMPEG_VERSION} as ffmpeg
-FROM frigate-web as web
+FROM andreaaspesi/frigate-web:1.0.0 as web
 
 FROM ubuntu:20.04
 
@@ -67,7 +67,8 @@ WORKDIR /opt/frigate/
 ADD frigate frigate/
 ADD migrations migrations/
 
-COPY --from=web /opt/frigate/build web/
+# COPY --from=web /opt/frigate/build web/
+COPY --from=web /build web/
 
 COPY run.sh /run.sh
 RUN chmod +x /run.sh

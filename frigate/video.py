@@ -15,6 +15,7 @@ import time
 from collections import defaultdict
 from setproctitle import setproctitle
 from typing import Dict, List
+import traceback
 
 import cv2
 import numpy as np
@@ -356,109 +357,108 @@ def process_frames(camera_name: str, frame_queue: mp.Queue, frame_shape, model_s
         except queue.Empty:
             continue
 
-        try:
-            current_frame_time.value = frame_time
+        current_frame_time.value = frame_time
 
-            frame = frame_manager.get(f"{camera_name}{frame_time}", (frame_shape[0]*3//2, frame_shape[1]))
+        frame = frame_manager.get(f"{camera_name}{frame_time}", (frame_shape[0]*3//2, frame_shape[1]))
 
-            if frame is None:
-                logger.info(f"{camera_name}: frame {frame_time} is not in memory store.")
-                continue
+        if frame is None:
+            logger.info(f"{camera_name}: frame {frame_time} is not in memory store.")
+            continue
 
-            if not detection_enabled.value:
-                fps.value = fps_tracker.eps()
-                object_tracker.match_and_update(frame_time, [])
-                detected_objects_queue.put((camera_name, frame_time, object_tracker.tracked_objects, [], []))
-                detection_fps.value = object_detector.fps.eps()
-                frame_manager.close(f"{camera_name}{frame_time}")
-                continue
+        if not detection_enabled.value:
+            fps.value = fps_tracker.eps()
+            object_tracker.match_and_update(frame_time, [])
+            detected_objects_queue.put((camera_name, frame_time, object_tracker.tracked_objects, [], []))
+            detection_fps.value = object_detector.fps.eps()
+            frame_manager.close(f"{camera_name}{frame_time}")
+            continue
 
-            # look for motion
-            motion_boxes = motion_detector.detect(frame)
+        # look for motion
+        motion_boxes = motion_detector.detect(frame)
 
-            # only get the tracked object boxes that intersect with motion
-            tracked_object_boxes = [obj['box'] for obj in object_tracker.tracked_objects.values() if intersects_any(obj['box'], motion_boxes)]
+        # only get the tracked object boxes that intersect with motion
+        tracked_object_boxes = [obj['box'] for obj in object_tracker.tracked_objects.values() if intersects_any(obj['box'], motion_boxes)]
 
-            # combine motion boxes with known locations of existing objects
-            combined_boxes = reduce_boxes(motion_boxes + tracked_object_boxes)
+        # combine motion boxes with known locations of existing objects
+        combined_boxes = reduce_boxes(motion_boxes + tracked_object_boxes)
 
-            # compute regions
-            regions = [calculate_region(frame_shape, a[0], a[1], a[2], a[3], 1.2)
-                for a in combined_boxes]
+        # compute regions
+        regions = [calculate_region(frame_shape, a[0], a[1], a[2], a[3], 1.2)
+            for a in combined_boxes]
 
-            # combine overlapping regions
-            combined_regions = reduce_boxes(regions)
+        # combine overlapping regions
+        combined_regions = reduce_boxes(regions)
 
-            # re-compute regions
-            regions = [calculate_region(frame_shape, a[0], a[1], a[2], a[3], 1.0)
-                for a in combined_regions]
+        # re-compute regions
+        regions = [calculate_region(frame_shape, a[0], a[1], a[2], a[3], 1.0)
+            for a in combined_regions]
 
-            # resize regions and detect
-            detections = []
-            for region in regions:
-                detections.extend(detect(object_detector, frame, model_shape, region, objects_to_track, object_filters))
-            
-            #########
-            # merge objects, check for clipped objects and look again up to 4 times
-            #########
-            refining = True
-            refine_count = 0
-            while refining and refine_count < 4:
-                refining = False
+        # resize regions and detect
+        detections = []
+        for region in regions:
+            detections.extend(detect(object_detector, frame, model_shape, region, objects_to_track, object_filters))
+        
+        #########
+        # merge objects, check for clipped objects and look again up to 4 times
+        #########
+        refining = True
+        refine_count = 0
+        while refining and refine_count < 4:
+            refining = False
 
-                # group by name
-                detected_object_groups = defaultdict(lambda: [])
-                for detection in detections:
-                    detected_object_groups[detection[0]].append(detection)
+            # group by name
+            detected_object_groups = defaultdict(lambda: [])
+            for detection in detections:
+                detected_object_groups[detection[0]].append(detection)
 
-                selected_objects = []
-                for group in detected_object_groups.values():
+            selected_objects = []
+            for group in detected_object_groups.values():
 
-                    # apply non-maxima suppression to suppress weak, overlapping bounding boxes
-                    boxes = [(o[2][0], o[2][1], o[2][2]-o[2][0], o[2][3]-o[2][1])
-                        for o in group]
-                    confidences = [o[1] for o in group]
-                    idxs = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
+                # apply non-maxima suppression to suppress weak, overlapping bounding boxes
+                boxes = [(o[2][0], o[2][1], o[2][2]-o[2][0], o[2][3]-o[2][1])
+                    for o in group]
+                confidences = [o[1] for o in group]
+                idxs = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
 
-                    for index in idxs:
-                        obj = group[index[0]]
-                        if clipped(obj, frame_shape):
-                            box = obj[2]
-                            # calculate a new region that will hopefully get the entire object
-                            region = calculate_region(frame_shape, 
-                                box[0], box[1],
-                                box[2], box[3])
+                for index in idxs:
+                    obj = group[index]
+                    logger.debug(f"Tracking: {obj}")
+                    
+                    if clipped(obj, frame_shape):
+                        box = obj[2]
+                        # calculate a new region that will hopefully get the entire object
+                        region = calculate_region(frame_shape, 
+                            box[0], box[1],
+                            box[2], box[3])
 
-                            regions.append(region)
-                            
-                            selected_objects.extend(detect(object_detector, frame, model_shape, region, objects_to_track, object_filters))
+                        regions.append(region)
+                        
+                        selected_objects.extend(detect(object_detector, frame, model_shape, region, objects_to_track, object_filters))
 
-                            refining = True
-                        else:
-                            selected_objects.append(obj)            
-                # set the detections list to only include top, complete objects
-                # and new detections
-                detections = selected_objects
+                        refining = True
+                    else:
+                        selected_objects.append(obj)            
+            # set the detections list to only include top, complete objects
+            # and new detections
+            detections = selected_objects
 
-                if refining:
-                    refine_count += 1
+            if refining:
+                refine_count += 1
 
-            # Limit to the detections overlapping with motion areas
-            # to avoid picking up stationary background objects
-            detections_with_motion = [d for d in detections if intersects_any(d[2], motion_boxes)]
+        # Limit to the detections overlapping with motion areas
+        # to avoid picking up stationary background objects
+        detections_with_motion = [d for d in detections if intersects_any(d[2], motion_boxes)]
 
-            # now that we have refined our detections, we need to track objects
-            object_tracker.match_and_update(frame_time, detections_with_motion)
+        # now that we have refined our detections, we need to track objects
+        object_tracker.match_and_update(frame_time, detections_with_motion)
 
-            # add to the queue if not full
-            if(detected_objects_queue.full()):
-                frame_manager.delete(f"{camera_name}{frame_time}")
-                continue
-            else:
-                fps_tracker.update()
-                fps.value = fps_tracker.eps()
-                detected_objects_queue.put((camera_name, frame_time, object_tracker.tracked_objects, motion_boxes, regions))
-                detection_fps.value = object_detector.fps.eps()
-                frame_manager.close(f"{camera_name}{frame_time}")
-        except Exception as ex:
-            logger.warn(f"Caught: f{ex}")
+        # add to the queue if not full
+        if(detected_objects_queue.full()):
+            frame_manager.delete(f"{camera_name}{frame_time}")
+            continue
+        else:
+            fps_tracker.update()
+            fps.value = fps_tracker.eps()
+            detected_objects_queue.put((camera_name, frame_time, object_tracker.tracked_objects, motion_boxes, regions))
+            detection_fps.value = object_detector.fps.eps()
+            frame_manager.close(f"{camera_name}{frame_time}")

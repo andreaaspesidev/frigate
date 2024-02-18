@@ -20,13 +20,13 @@ RUN apt-get -qq update \
 RUN wget --no-check-certificate https://bootstrap.pypa.io/get-pip.py -O get-pip.py \ 
     && python3 get-pip.py
 
-RUN pip3 install scikit-build==0.13.1
+RUN pip3 install scikit-build
 
-RUN pip3 wheel --wheel-dir=/wheels    opencv-python-headless==4.5.3.56
-RUN pip3 wheel --wheel-dir=/wheels    numpy==1.21.2
-RUN pip3 wheel --wheel-dir=/wheels    imutils==0.5.4
-RUN pip3 wheel --wheel-dir=/wheels    psutil==5.8.0
-RUN pip3 wheel --wheel-dir=/wheels    matplotlib==3.4.3
+RUN pip3 wheel --wheel-dir=/wheels    opencv-python-headless
+RUN pip3 wheel --wheel-dir=/wheels    numpy
+RUN pip3 wheel --wheel-dir=/wheels    imutils
+RUN pip3 wheel --wheel-dir=/wheels    psutil
+RUN pip3 wheel --wheel-dir=/wheels    matplotlib
 RUN pip3 wheel --wheel-dir=/wheels    scipy==1.6.1
 
 RUN apt-get remove -y cython
@@ -34,20 +34,20 @@ RUN apt-get remove -y cython
 RUN pip3 install "Cython<3.0" --no-build-isolation
 
 RUN pip3 wheel --no-build-isolation --wheel-dir=/wheels \    
-    Flask==1.1.2 \
-    Flask-Sockets==0.2.1 \
-    paho-mqtt==1.5.1 \
-    PyYAML==5.4.1 \
-    setproctitle==1.2.2 \
+    Flask==2.1.0 \
+    Flask-Sockets \
+    paho-mqtt \
+    PyYAML==6.0.1 \
+    setproctitle \
     peewee==3.14.1 \
-    peewee_migrate==1.4.6 \
+    peewee_migrate \
     gevent==21.1.2 \
-    gevent-websocket==0.10.1
-    
+    gevent-websocket
+
 RUN pip3 wheel --wheel-dir=/wheels \
-    zeroconf==0.36.8 \
-    voluptuous==0.12.2 \
-    click==8.0.3
+    zeroconf \
+    voluptuous\
+    click
 
 FROM scratch
 
